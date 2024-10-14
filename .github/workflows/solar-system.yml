@@ -15,10 +15,44 @@ jobs:
   unit-tests:
     runs-on: ubuntu-latest
     steps:
-    - uses: actions/checkout@v4
+    - name: Checkout
+      uses: actions/checkout@v4
+
     - name: Set up NodeJs
       uses: actions/setup-node@v4
+
     - name: Install dependencies
       run: npm install
+
     - name: Test
       run: npm test
+
+    - name: Archive Test Results
+      uses: actions/upload-artifact@v4
+      with:
+        name: mocha-test-results
+        path: test-results.xml
+
+  test-coverage:
+    name: Test Coverage
+    runs-on: ubuntu-latest
+    steps:
+    - name: Checkout
+      uses: actions/checkout@v4
+
+    - name: Set up NodeJs
+      uses: actions/setup-node@v4
+
+    - name: Install dependencies
+      run: npm install
+
+    - name: Test Coverage
+      run: npm run coverage
+      continue-on-error: true
+
+    - name: Archive Test Results
+      uses: actions/upload-artifact@v4
+      with:
+        name: coverage-results
+        path: coverage
+        retention-days: 5
