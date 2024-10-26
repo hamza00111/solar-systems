@@ -52,12 +52,21 @@ jobs:
   test-coverage:
     name: Test Coverage
     runs-on: ubuntu-latest
+    container:
+      image: node:18
+    services:
+      mongo-db:
+        image: siddharth67/mongo-db:non-prod
+        options:
+          --name mongo
+    env:
+      MONGO_URI: 'mongodb://mongo:27017/superData'
+      MONGO_USERNAME: ${{ vars.MONGO_TEST_USERNAME }}
+      MONGO_PASSWORD: ${{ secrets.MONGO_TEST_PASSWORD }}
+
     steps:
     - name: Checkout
       uses: actions/checkout@v4
-
-    - name: Set up NodeJs
-      uses: actions/setup-node@v4
 
     - name: Cache node modules
       uses: actions/cache@v4
