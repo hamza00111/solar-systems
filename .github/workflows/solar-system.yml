@@ -109,3 +109,39 @@ jobs:
         context: .
         push: true
         tags: ${{ vars.DOCKER_USERNAME }}/solar-system:${{ github.sha }}
+
+  dev-deploy:
+    needs: docker
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: install kubectl
+        uses: azure/setup-kubectl@v4
+        with:
+          version: 'v1.31.0'
+        id: install
+
+      - name: Install AWS CLI
+        run: |
+          curl "https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip" -o "awscliv2.zip"
+          unzip awscliv2.zip
+          sudo ./aws/install --update
+
+      - name: Configure AWS Credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWSACCOUNTID }}
+          aws-secret-access-key: ${{ secrets.AWSSECRET }}
+          aws-region: us-east-1
+
+      - name: Update kubeconfig for EKS
+        run: |
+          aws eks update-kubeconfig --region $AWS_DEFAULT_REGION --name ${{ vars.KUBE_CLUSTER }}
+
+      - name: Fetch Kube details
+        run: |
+          kubectl version
+          echo -----------------------
+          kubectl get nodes
