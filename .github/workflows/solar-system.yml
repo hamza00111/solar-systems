@@ -23,7 +23,7 @@ jobs:
       MONGO_URI: 'mongodb://127.0.0.1:27017/superData'
       MONGO_USERNAME: ${{ vars.MONGO_TEST_USERNAME }}
       MONGO_PASSWORD: ${{ secrets.MONGO_TEST_PASSWORD }}
-    runs-on: ubuntu-latest
+    runs-on: self-hosted
     steps:
     - name: Checkout
       uses: actions/checkout@v4
@@ -51,7 +51,7 @@ jobs:
 
   test-coverage:
     name: Test Coverage
-    runs-on: ubuntu-latest
+    runs-on: self-hosted
     container:
       image: node:18
     services:
@@ -92,7 +92,7 @@ jobs:
     name: docker
     needs: [unit-tests, test-coverage]
 
-    runs-on: ubuntu-latest
+    runs-on: self-hosted
     steps:
     - name: Checkout
       uses: actions/checkout@v4
@@ -112,7 +112,7 @@ jobs:
 
   dev-deploy:
     needs: docker
-    runs-on: ubuntu-latest
+    runs-on: self-hosted
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -129,16 +129,22 @@ jobs:
           unzip awscliv2.zip
           sudo ./aws/install --update
 
-      - name: Configure AWS Credentials
-        uses: aws-actions/configure-aws-credentials@v4
-        with:
-          aws-access-key-id: ${{ secrets.AWSACCOUNTID }}
-          aws-secret-access-key: ${{ secrets.AWSSECRET }}
-          aws-region: us-east-1
+#      - name: Configure AWS Credentials
+#        uses: aws-actions/configure-aws-credentials@v4
+#        with:
+#          aws-access-key-id: ${{ secrets.AWSACCOUNTID }}
+#          aws-secret-access-key: ${{ secrets.AWSSECRET }}
+#          aws-region: us-east-1
+#
+#      - name: Update kubeconfig for EKS
+#        run: |
+#          aws eks update-kubeconfig --region $AWS_DEFAULT_REGION --name ${{ vars.KUBE_CLUSTER }}
 
-      - name: Update kubeconfig for EKS
+      - name: Set up Kubeconfig
+        env:
+          KUBECONFIG_DATA: ${{ secrets.KUBECONFIG }}
         run: |
-          aws eks update-kubeconfig --region $AWS_DEFAULT_REGION --name ${{ vars.KUBE_CLUSTER }}
+          echo "$KUBECONFIG_DATA" | base64 -d > $HOME/.kube/config
 
       - name: Fetch Kube Details
         run: |
@@ -165,3 +171,15 @@ jobs:
       - name: Check Files
         run: |
           cat kubernetes/development/*.yaml
+
+      - name: Create Mongo Secret
+        run: |
+          kubectl -n ${{ vars.NAMESPACE }} create secret generic mongo-db-creds \
+          --from-literal=MONGO_URI=${{ env.MONGO_URI }} \
+          --from-literal=MONGO_USERNAME=${{ env.MONGO_USERNAME }} \
+          --from-literal=MONGO_PASSWORD=${{ env.MONGO_PASSWORD }} \
+          --dry-run=client -o yaml | kubectl apply -f -
+
+      - name: Deploy To DEV
+        run: |
+          kubectl apply -f kubernetes/development
