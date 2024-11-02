@@ -91,7 +91,6 @@ jobs:
   docker:
     name: docker
     needs: [unit-tests, test-coverage]
-
     runs-on: ubuntu-latest
     steps:
     - name: Checkout
@@ -120,25 +119,34 @@ jobs:
       - name: install kubectl
         uses: azure/setup-kubectl@v4
         with:
-          version: 'v1.31.0'
+          version: 'v1.31.1'
         id: install
 
-      - name: Install AWS CLI
-        run: |
-          curl "https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip" -o "awscliv2.zip"
-          unzip awscliv2.zip
-          sudo ./aws/install --update
+#      - name: Install AWS CLI
+#        run: |
+#          curl "https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip" -o "awscliv2.zip"
+#          unzip awscliv2.zip
+#          sudo ./aws/install --update
+#
+#      - name: Configure AWS Credentials
+#        uses: aws-actions/configure-aws-credentials@v4
+#        with:
+#          aws-access-key-id: ${{ secrets.AWSACCOUNTID }}
+#          aws-secret-access-key: ${{ secrets.AWSSECRET }}
+#          aws-region: us-east-1
 
-      - name: Configure AWS Credentials
-        uses: aws-actions/configure-aws-credentials@v4
+      - name: Install doctl
+        uses: digitalocean/action-doctl@v2
         with:
-          aws-access-key-id: ${{ secrets.AWSACCOUNTID }}
-          aws-secret-access-key: ${{ secrets.AWSSECRET }}
-          aws-region: us-east-1
+          token: ${{ secrets.DIGITAL_OCEAN_TOKEN }}
 
-      - name: Update kubeconfig for EKS
-        run: |
-          aws eks update-kubeconfig --region $AWS_DEFAULT_REGION --name ${{ vars.KUBE_CLUSTER }}
+
+      #      - name: Update kubeconfig for EKS
+#        run: |
+#          aws eks update-kubeconfig --region $AWS_DEFAULT_REGION --name ${{ vars.KUBE_CLUSTER }}
+
+      - name: Save DigitalOcean kubeconfig
+        run: doctl kubernetes cluster kubeconfig save --expiry-seconds 600 ${{ secrets.CLUSTER_NAME }}
 
       - name: Fetch Kube Details
         run: |
@@ -146,22 +154,34 @@ jobs:
           echo -----------------------
           kubectl get nodes
 
-      - name: Get Kube LoadBalancer HostName
-        run: |
-          echo "INGRESS_IP=$(kubectl -n ingress-nginx get services ingress-nginx-controller -o jsonpath='{.status.loadBalancer.ingress[0].hostname}')" >> $GITHUB_ENV
-
-      - name: Replace Tokens In Manifest Files
-        uses: cschleiden/replace-tokens@v1
-        with:
-          tokenPrefix: '_{_'
-          tokenSuffix: '_}_'
-          files: '["kubernetes/development/*.yaml"]'
-        env:
-          NAMESPACE: ${{ vars.NAMESPACE }}
-          REPLICAS: ${{ vars.REPLICAS }}
-          IMAGE: ${{ vars.DOCKER_USERNAME }}/solar-system:${{ github.sha }}
-          INGRESS_IP: ${{ env.INGRESS_IP }}
-
-      - name: Check Files
-        run: |
-          cat kubernetes/development/*.yaml
+#      - name: Get Kube LoadBalancer HostName
+#        run: |
+#          echo "INGRESS_IP=$(kubectl -n ingress-nginx get services ingress-nginx-controller -o jsonpath='{.status.loadBalancer.ingress[0].hostname}')" >> $GITHUB_ENV
+#
+#      - name: Replace Tokens In Manifest Files
+#        uses: cschleiden/replace-tokens@v1
+#        with:
+#          tokenPrefix: '_{_'
+#          tokenSuffix: '_}_'
+#          files: '["kubernetes/development/*.yaml"]'
+#        env:
+#          NAMESPACE: ${{ vars.NAMESPACE }}
+#          REPLICAS: ${{ vars.REPLICAS }}
+#          IMAGE: ${{ vars.DOCKER_USERNAME }}/solar-system:${{ github.sha }}
+#          INGRESS_IP: ${{ env.INGRESS_IP }}
+#
+#      - name: Check Files
+#        run: |
+#          cat kubernetes/development/*.yaml
+#
+#      - name: Create Mongo Secret
+#        run: |
+#          kubectl -n ${{ vars.NAMESPACE }} create secret generic mongo-db-creds \
+#          --from-literal=MONGO_URI=${{ env.MONGO_URI }} \
+#          --from-literal=MONGO_USERNAME=${{ env.MONGO_USERNAME }} \
+#          --from-literal=MONGO_PASSWORD=${{ env.MONGO_PASSWORD }} \
+#          --dry-run=client -o yaml | kubectl apply -f -
+#
+#      - name: Deploy To DEV
+#        run: |
+#          kubectl apply -f kubernetes/development
