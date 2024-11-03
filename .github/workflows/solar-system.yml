@@ -1,4 +1,4 @@
-name: Build Solar System
+name: Build and Deploy Solar System
 
 on:
   push:
@@ -12,85 +12,16 @@ env:
   MONGO_PASSWORD: ${{ secrets.MONGO_PASSWORD }}
 
 jobs:
-  unit-tests:
-    name: Unit Testing
-    services:
-      mongo-db:
-        image: siddharth67/mongo-db:non-prod
-        ports:
-          - 27017:27017
-    env:
-      MONGO_URI: 'mongodb://127.0.0.1:27017/superData'
-      MONGO_USERNAME: ${{ vars.MONGO_TEST_USERNAME }}
-      MONGO_PASSWORD: ${{ secrets.MONGO_TEST_PASSWORD }}
-    runs-on: ubuntu-latest
-    steps:
-    - name: Checkout
-      uses: actions/checkout@v4
-
-    - name: Set up NodeJs
-      uses: actions/setup-node@v4
-
-    - name: Cache node modules
-      uses: actions/cache@v4
-      with:
-        path: node_modules
-        key: ${{ runner.os }}-node-modules-${{ hashFiles('**/package-lock.json') }}
-
-    - name: Install dependencies
-      run: npm install
-
-    - name: Test
-      run: npm test
-
-    - name: Archive Test Results
-      uses: actions/upload-artifact@v4
-      with:
-        name: mocha-test-results
-        path: test-results.xml
-
-  test-coverage:
-    name: Test Coverage
-    runs-on: ubuntu-latest
-    container:
-      image: node:18
-    services:
-      mongo-db:
-        image: siddharth67/mongo-db:non-prod
-        options:
-          --name mongo
-    env:
-      MONGO_URI: 'mongodb://mongo:27017/superData'
-      MONGO_USERNAME: ${{ vars.MONGO_TEST_USERNAME }}
-      MONGO_PASSWORD: ${{ secrets.MONGO_TEST_PASSWORD }}
-
-    steps:
-    - name: Checkout
-      uses: actions/checkout@v4
-
-    - name: Cache node modules
-      uses: actions/cache@v4
-      with:
-        path: node_modules
-        key: ${{ runner.os }}-node-modules-${{ hashFiles('**/package-lock.json') }}
-
-    - name: Install dependencies
-      run: npm install
-
-    - name: Test Coverage
-      run: npm run coverage
-      continue-on-error: true
-
-    - name: Archive Test Results
-      uses: actions/upload-artifact@v4
-      with:
-        name: coverage-results
-        path: coverage
-        retention-days: 5
+  build:
+    name: Build
+    uses: ./.github/workflows/build.yml
+    secrets:
+      MONGO_PASSWORD: ${{ secrets.MONGO_PASSWORD }}
+      MONGO_TEST_PASSWORD: ${{ secrets.MONGO_TEST_PASSWORD }}
 
   docker:
     name: docker
-    needs: [unit-tests, test-coverage]
+    needs: [ build ]
     runs-on: ubuntu-latest
     steps:
     - name: Checkout
@@ -198,8 +129,8 @@ jobs:
           echo "-------------------------------"
           echo $INGRESS_APP_URL
 
-  integration-test:
-    name: Integration Testing
+  dev-integration-test:
+    name: Development Integration Testing
     needs: dev-deploy
     runs-on: ubuntu-latest
     steps:
@@ -210,3 +141,87 @@ jobs:
           echo ${{ env.URL }}
           echo "-------------------------"
           curl https://${{ env.URL }}/live -s -k | jq -r .status | grep -i "live"
+
+#  prod-deploy:
+#    needs: dev-integration-test
+#    runs-on: ubuntu-latest
+#    environment:
+#      name: production
+#      url: https://${{ steps.getUrl.outputs.INGRESS_APP_URL }}
+#    outputs:
+#      APP_INGRESS_URL:  ${{ steps.getUrl.outputs.INGRESS_APP_URL }}
+#    steps:
+#      - name: Checkout
+#        uses: actions/checkout@v4
+#
+#      - name: install kubectl
+#        uses: azure/setup-kubectl@v4
+#        with:
+#          version: 'v1.31.1'
+#        id: install
+#
+#      - name: Install doctl
+#        uses: digitalocean/action-doctl@v2
+#        with:
+#          token: ${{ secrets.DIGITAL_OCEAN_TOKEN }}
+#
+#      - name: Save DigitalOcean kubeconfig
+#        run: doctl kubernetes cluster kubeconfig save --expiry-seconds 600 ${{ secrets.CLUSTER_NAME }}
+#
+#      - name: Fetch Kube Details
+#        run: |
+#          kubectl version
+#          echo -----------------------
+#          kubectl get nodes
+#
+#      - name: Get Kube LoadBalancer HostName
+#        run: |
+#          echo "INGRESS_IP=$(kubectl -n ingress-nginx get services ingress-nginx-controller -o jsonpath='{.status.loadBalancer.ingress[0].ip}')" >> $GITHUB_ENV
+#
+#      - name: Replace Tokens In Manifest Files
+#        uses: cschleiden/replace-tokens@v1
+#        with:
+#          tokenPrefix: '_{_'
+#          tokenSuffix: '_}_'
+#          files: '["kubernetes/production/*.yaml"]'
+#        env:
+#          NAMESPACE: ${{ vars.NAMESPACE }}
+#          REPLICAS: ${{ vars.REPLICAS }}
+#          IMAGE: ${{ vars.DOCKER_USERNAME }}/solar-system:${{ github.sha }}
+#          INGRESS_IP: ${{ env.INGRESS_IP }}
+#
+#      - name: Check Files
+#        run: |
+#          cat kubernetes/production/*.yaml
+#
+#      - name: Create Mongo Secret
+#        run: |
+#          kubectl -n ${{ vars.NAMESPACE }} create secret generic mongo-db-creds \
+#          --from-literal=MONGO_URI=${{ env.MONGO_URI }} \
+#          --from-literal=MONGO_USERNAME=${{ env.MONGO_USERNAME }} \
+#          --from-literal=MONGO_PASSWORD=${{ env.MONGO_PASSWORD }} \
+#          --dry-run=client -o yaml | kubectl apply -f -
+#
+#      - name: Deploy To DEV
+#        run: |
+#          kubectl apply -f kubernetes/production
+#
+#      - name: Get URL
+#        id: getUrl
+#        run: |
+#          echo "INGRESS_APP_URL=$(kubectl -n ${{ vars.NAMESPACE }} get ingress -o jsonpath="{.items[0].spec.tls[0].hosts[0]}")" >> $GITHUB_OUTPUT
+#          echo "-------------------------------"
+#          echo $INGRESS_APP_URL
+#
+#  prod-integration-test:
+#    name: Production Integration Testing
+#    needs: prod-deploy
+#    runs-on: ubuntu-latest
+#    steps:
+#      - name: Test Application Using Curl
+#        env:
+#          URL: ${{ needs.prod-deploy.outputs.APP_INGRESS_URL }}
+#        run: |
+#          echo ${{ env.URL }}
+#          echo "-------------------------"
+#          curl https://${{ env.URL }}/live -s -k | jq -r .status | grep -i "live"
