@@ -1,0 +1,90 @@
+name: build.yml
+on:
+  workflow_call:
+    secrets:
+      MONGO_PASSWORD:
+        required: true
+      MONGO_TEST_PASSWORD:
+        required: true
+
+env:
+  MONGO_URI: 'mongodb+srv://supercluster.d83jj.mongodb.net/superData'
+  MONGO_USERNAME: ${{ vars.MONGO_USERNAME }}
+  MONGO_PASSWORD: ${{ secrets.MONGO_PASSWORD }}
+
+jobs:
+  unit-tests:
+    name: Unit Testing
+    services:
+      mongo-db:
+        image: siddharth67/mongo-db:non-prod
+        ports:
+          - 27017:27017
+    env:
+      MONGO_URI: 'mongodb://127.0.0.1:27017/superData'
+      MONGO_USERNAME: ${{ vars.MONGO_TEST_USERNAME }}
+      MONGO_PASSWORD: ${{ secrets.MONGO_TEST_PASSWORD }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up NodeJs
+        uses: actions/setup-node@v4
+
+      - name: Cache node modules
+        uses: actions/cache@v4
+        with:
+          path: node_modules
+          key: ${{ runner.os }}-node-modules-${{ hashFiles('**/package-lock.json') }}
+
+      - name: Install dependencies
+        run: npm install
+
+      - name: Test
+        run: npm test
+
+      - name: Archive Test Results
+        uses: actions/upload-artifact@v4
+        with:
+          name: mocha-test-results
+          path: test-results.xml
+
+  test-coverage:
+    name: Test Coverage
+    runs-on: ubuntu-latest
+    container:
+      image: node:18
+    services:
+      mongo-db:
+        image: siddharth67/mongo-db:non-prod
+        options:
+          --name mongo
+    env:
+      MONGO_URI: 'mongodb://mongo:27017/superData'
+      MONGO_USERNAME: ${{ vars.MONGO_TEST_USERNAME }}
+      MONGO_PASSWORD: ${{ secrets.MONGO_TEST_PASSWORD }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Cache node modules
+        uses: actions/cache@v4
+        with:
+          path: node_modules
+          key: ${{ runner.os }}-node-modules-${{ hashFiles('**/package-lock.json') }}
+
+      - name: Install dependencies
+        run: npm install
+
+      - name: Test Coverage
+        run: npm run coverage
+        continue-on-error: true
+
+      - name: Archive Test Results
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-results
+          path: coverage
+          retention-days: 5
