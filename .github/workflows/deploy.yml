@@ -1,0 +1,117 @@
+name: deploy.yml
+on:
+  workflow_call:
+    secrets:
+      MONGO_PASSWORD:
+        required: true
+      MONGO_TEST_PASSWORD:
+        required: true
+      DIGITAL_OCEAN_TOKEN:
+        required: true
+      CLUSTER_NAME:
+        required: true
+      DOCKER_PASSWORD:
+        required: true
+    inputs:
+      mongo-uri:
+        required: true
+        type: string
+      kube-version:
+        required: false
+        type: string
+        default: latest
+      kube-manifest-dir:
+        required: true
+        type: string
+        default: kubernetes/
+      environment:
+        required: true
+        type: string
+        default: development
+      host-runner:
+        required: false
+        type: string
+        default: ubuntu-latest
+      namespace:
+        required: true
+        type: string
+        default: development
+      docker-username:
+        required: true
+        type: string
+      image:
+        required: true
+        type: string
+    outputs:
+      APP_INGRESS_URL:
+        value: ${{ jobs.deploy.outputs.app-url }}
+
+jobs:
+  deploy:
+    runs-on: ${{ inputs.host-runner }}
+    environment:
+      name: ${{ inputs.environment }}
+      url: https://${{ steps.getUrl.outputs.INGRESS_APP_URL }}
+    outputs:
+      app-url: ${{ steps.getUrl.outputs.INGRESS_APP_URL }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install kubectl
+        uses: azure/setup-kubectl@v4
+        with:
+          version: ${{ inputs.kube-version }}
+        id: install
+
+      - name: Install doctl
+        uses: digitalocean/action-doctl@v2
+        with:
+          token: ${{ secrets.DIGITAL_OCEAN_TOKEN }}
+
+      - name: Save DigitalOcean kubeconfig
+        run: doctl kubernetes cluster kubeconfig save --expiry-seconds 600 ${{ secrets.CLUSTER_NAME }}
+
+      - name: Fetch Kube Details
+        run: |
+          kubectl version
+          echo -----------------------
+          kubectl get nodes
+
+      - name: Get Kube LoadBalancer HostName
+        run: |
+          echo "INGRESS_IP=$(kubectl -n ingress-nginx get services ingress-nginx-controller -o jsonpath='{.status.loadBalancer.ingress[0].ip}')" >> $GITHUB_ENV
+
+      - name: Replace Tokens In Manifest Files
+        uses: cschleiden/replace-tokens@v1
+        with:
+          tokenPrefix: '_{_'
+          tokenSuffix: '_}_'
+          files: "${{ inputs.kube-manifest-dir }}/*.yaml"
+        env:
+          NAMESPACE: ${{ inputs.namespace }}
+          IMAGE: ${{ inputs.image }}
+          DOCKER_USERNAME: ${{ inputs.docker-username }}
+          INGRESS_IP: ${{ env.INGRESS_IP }}
+
+      - name: Debug Manifest Files
+        run: cat ${{ inputs.kube-manifest-dir }}/*.yaml
+
+      - name: Create Mongo Secret
+        run: |
+          kubectl -n ${{ inputs.namespace }} create secret generic mongo-db-creds \
+          --from-literal=MONGO_URI=${{ inputs.mongo-uri }} \
+          --from-literal=MONGO_USERNAME=${{ secrets.MONGO_USERNAME }} \
+          --from-literal=MONGO_PASSWORD=${{ secrets.MONGO_PASSWORD }} \
+          --dry-run=client -o yaml | kubectl apply -f -
+
+      - name: Deploy To DEV
+        run: |
+          kubectl apply -f ${{ inputs.kube-manifest-dir }}
+
+      - name: Get URL
+        id: getUrl
+        run: |
+          echo "INGRESS_APP_URL=$(kubectl -n ${{ inputs.namespace }} get ingress -o jsonpath='{.items[0].spec.tls[0].hosts[0]}')" >> $GITHUB_OUTPUT
+          echo "-------------------------------"
+          echo $INGRESS_APP_URL
